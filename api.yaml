@@ -151,12 +151,12 @@ paths:
         uri: { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:dynamodb:action/UpdateItem" }
         httpMethod: "POST"
         requestTemplates:
-          application/json: { "Fn::Sub": "{\"TableName\": \"${LinkTable}\",\
+          application/json: { "Fn::Sub": "#set( $seconds = (($context.requestTimeEpoch/1000)+2419200) ){\"TableName\": \"${LinkTable}\",\
             \"ConditionExpression\":\"attribute_not_exists(id)\", \
             \"Key\": {\"id\": {\"S\": $input.json('$.id')}}, \
-            \"ExpressionAttributeNames\": {\"#u\": \"url\",\"#o\": \"owner\",\"#ts\": \"timestamp\"}, \
-            \"ExpressionAttributeValues\":{\":u\": {\"S\": $input.json('$.url')},\":o\": {\"S\": \"bFAN\"},\":ts\": {\"S\": \"$context.requestTime\"}}, \
-            \"UpdateExpression\": \"SET #u = :u, #o = :o, #ts = :ts\", \
+            \"ExpressionAttributeNames\": {\"#u\": \"url\",\"#o\": \"owner\",\"#ts\": \"timestamp\",\"#exp\": \"expiration\"}, \
+            \"ExpressionAttributeValues\":{\":u\": {\"S\": $input.json('$.url')},\":o\": {\"S\": \"bFAN\"},\":ts\": {\"S\": \"$context.requestTime\"},\":exp\": {\"N\": \"$seconds\"}}, \
+            \"UpdateExpression\": \"SET #u = :u, #o = :o, #ts = :ts, #exp = :exp\", \
             \"ReturnValues\": \"ALL_NEW\"}" }
         passthroughBehavior: "when_no_templates"
         responses:
@@ -372,15 +372,3 @@ components:
       description: Short link ID for full URL
       schema:
         type: string
-
-## Authorizer definition
-# securityDefinitions:
-#   UserAuthorizer:
-#     type: "apiKey"
-#     name: "Authorization"
-#     in: "header"
-#     x-amazon-apigateway-authtype: "cognito_user_pools"
-#     x-amazon-apigateway-authorizer:
-#       providerARNs:
-#       - Fn::GetAtt: [ UserPool, Arn ]
-#       type: "cognito_user_pools"

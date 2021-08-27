@@ -14,7 +14,8 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTIO
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. -->
 
-# Functionless URL Shortener
+# Simpler Functionless URL Shortener
+
 This app creates a URL shortener without using any compute. All business logic is handled at the Amazon API Gateway level. The basic app will create an API Gateway instance utilizing Cognito for authentication and authorization. It will also create an Amazon DynamoDB table for data storage. It will also create a simple Vuejs application as a demo client.
 
 Read the blog series about this application:
@@ -22,16 +23,22 @@ Read the blog series about this application:
 1. [Building a serverless URL shortener app without AWS Lambda – part 2](https://aws.amazon.com/blogs/compute/building-a-serverless-url-shortener-app-without-lambda-part-2)
 1. [Building a serverless URL shortener app without AWS Lambda – part 3](https://aws.amazon.com/blogs/compute/building-a-serverless-url-shortener-app-without-lambda-part-3)
 
+# About this fork
+
+There is no Amplify, Cognito, Cloud Front. You will target the API directly.
+
+Authentication is done using API Gateway API Keys. You must configure one and provide a key in your queries header using the `X-API-Key` header.
+
+DynamoDB table now allows item auto expiration after one month. We add a new field `expiration` to all entries and set the table to use this field
+to auto expire items.
+
+`owner` is now set to `bFAN` and not dynamic as there is no more Cognito UserPool but you can change it directly in the `api.xml` file.
+
 ## The Backend
 
 ### Services Used
 * <a href="https://aws.amazon.com/api-gateway/" target="_blank">Amazon API Gateway</a>
-* <a href="https://aws.amazon.com/cognito/" target="_blank">Amazon Cognito</a>
 * <a href="https://aws.amazon.com/dynamodb/" target="_bank">Amazon DynamoDB</a>
-* <a href="https://aws.amazon.com/amplify/console/" target="_blank">AWS Amplify Console</a>
-* <a href="https://aws.amazon.com/cloudfront/" target="_blank">Amazon CloudFront</a> *Will cause a lengthy deployment time. See note under **Deploying**
-* <a href="https://aws.amazon.com/s3/" target="_blank">Amazon S3</a>
-
 
 ### Requirements for deployment
 * <a href="https://aws.amazon.com/cli/" target="_blank">AWS CLI</a>
@@ -45,7 +52,6 @@ Read the blog series about this application:
 
 ### Deploying
 
-***Note: This stack includes an Amazon CloudFront distribution which can take around 30 minutes to create. Don't be alarmed if the deploy seems to hang for a long time.***
 In the terminal, use the SAM CLI guided deployment the first time you deploy
 ```bash
 sam deploy -g
@@ -59,13 +65,10 @@ You can choose the default for all options except *GithubRepository* and **
 Stack Name [URLShortener]:
 
 ## The region you want to deploy in
-AWS Region [us-west-2]:
+AWS Region [eu-west-1]:
 
 ## The name of the application (lowercase no spaces). This must be globally unique
 Parameter AppName [shortener]:
-
-## Enables public client and local client for testing. (Less secure)
-Parameter UseLocalClient [false]:
 
 ## GitHub forked repository URL
 Parameter GithubRepository []:
@@ -87,68 +90,17 @@ SAM will then deploy the AWS CloudFormation stack to your AWS account and provid
 
 After the first deploy you may re-deploy using `sam deploy` or redeploy with different options using `sam deploy -g`.
 
-## The Client
+### Usage
 
-*The client can also be run locally for debugging. Instructions can be found [here](./client/README.md).*
+You must include the `X-API-Key` Header in your http queries to authenticate with API Gateway. The Key is available in API Gateway `API Keys` section in the console.
 
-The client is a Vue.js application that interfaces with the backend and allows you to authenticate and manage URL links. The client is hosted using Amplify Console. To avoid circular dependencies, we need to provide some information for the client after stack is built. The information needed is provided at the end of the deploy process. If you do not have the information you can run the following:
+The URLs to call are:
 
-```bash
-aws cloudformation describe-stacks --stack-name URLShortener
-```
+   * POST `shorter.bfansports.com/app`: Create a new short URL.
+      * body: `{"id":"ABCDEFGHIJ12345", "url":"https://the.url.I.want.to.reach.com"}`
+   * GET  `shorter.bfansports.com/${id}`: Get the URL associated with an ID
+      * path: The ID of the URL to redirect to
 
-We need to add this information to the environment variables for the Amplify Console app. There are two options for adding the variables.
+Other calls are available. See the `api.yaml` file
 
-#### Option 1: using the AWS CLI (Update the *\<values\>* to reflect the information returned from the deployment.)
 
-```bash
-aws amplify update-app --app-id <MyAmplifyAppId> --environment-variables \
-VUE_APP_NAME=<VueAppName>\
-,VUE_APP_CLIENT_ID=<VUE_APP_CLIENT_ID>\
-,VUE_APP_API_ROOT=<VUE_APP_API_ROOT>\
-,VUE_APP_AUTH_DOMAIN=<VUE_APP_AUTH_DOMAIN>
-```
-
-*Also available in the stack output as **AmplifyEnvironmentUpdateCommand***
-
-#### Option 2: Amplify Console page
-1. Open the [Amplify Console page](https://us-west-2.console.aws.amazon.com/amplify/home)
-1. On the left side, under **All apps**, choose *Url-Shortner-Client*
-1. Under **App settings** choose *Environment variables*
-1. Choose the *manage variables* button
-1. Choose *add variable*
-1. Fill in the *variable* and it's corresponding *Value*
-1. Leave defaults for *Branches* and *Actions*
-1. Repeat for all four variables
-1. Choose save
-
-### Starting the first deployment
-After deploying the CloudFormation template, you need to go into the Amplify Console and trigger a build. The CloudFormation template can provision the resources, but can’t trigger a build since it creates resources but cannot trigger actions. This can be done via the AWS CLI.
-
-#### Option 1: Using the AWS CLI (Update the *\<values\>* to reflect the information returned from the deployment.)
-
-```bash
-aws amplify start-job --app-id <MyAmplifyAppId> --branch-name master --job-type RELEASE
-```
-*Also available in the stack output as **AmplifyDeployCommand***
-
-To check on the status, you can view it on the AWS Amplify Console or run:
-```bash
-aws amplify get-job --app-id <MyAmplifyAppId> --branch-name master --job-id <JobId>
-```
-
-#### Option 2: Amplify Console page
-1. Open the <a href="https://us-west-2.console.aws.amazon.com/amplify/home" target="_blank">Amplify Console page</a>
-1. On the left side, under **All apps**, choose *Url-Shortner-Client*
-1. Click *Run build*
-
-*Note: this is only required for the first build subsequent client builds will be triggered when updates are committed to your forked repository.
-
-## Cleanup
-1. Open the <a href="https://us-west-2.console.aws.amazon.com/cloudformation/home" target="_blank">CloudFormation console</a>
-1. Locate a stack named *URLShortener*
-1. Select the radio option next to it
-1. Select **Delete**
-1. Select **Delete stack** to confirm
-
-*Note: If you opted to have access logs (on by default), you may have to delete the S3 bucket manually.
