@@ -26,19 +26,12 @@ Parameters:
     Type: String
     Description: Name of application (no spaces). Value must be globally unique
     Default: shortener
-  GithubRepository:
-    Type: String
-    Description: Forked GitHub repository URL
-  PersonalAcessToken:
-    Type: String
-    Description: Github personal access token
-    NoEcho: true
 
 ###################################################################################################
 ##   Template Resources                                                                          ##
 ###################################################################################################
 Resources:
-  ##   API Gateway                                                                                 
+  ##   API Gateway
   UrlShortenerAPI:
     Type: AWS::Serverless::Api
     Properties:
@@ -82,8 +75,6 @@ Resources:
           AttributeType: S
         - AttributeName: owner
           AttributeType: S
-        - AttributeName: expiration
-          AttributeType: N
       GlobalSecondaryIndexes:
         - IndexName: OwnerIndex
           KeySchema:
@@ -91,6 +82,57 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
+
+  # API key definitions
+  ShortenerApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn:
+      - UrlShortenerAPI
+    Properties:
+      Name: Shortener API Key
+      Description: API Key to be used by shortener users
+      Enabled: 'true'
+      StageKeys:
+        - RestApiId:
+            Ref: UrlShortenerAPI
+          StageName: Prod
+        - RestApiId:
+            Ref: UrlShortenerAPI
+          StageName: Stage
+
+  # Linking of API keys to usage plans
+  ShortenerUsagePlanKey:
+    Type: "AWS::ApiGateway::UsagePlanKey"
+    DependsOn:
+      - UrlShortenerAPI
+      - ShortenerApiKey
+    Properties:
+      KeyId:
+        Ref: ShortenerApiKey
+      KeyType: API_KEY
+      UsagePlanId:
+        Ref: ShortenerUsagePlan
+
+  ShortenerUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - UrlShortenerAPI
+    Properties:
+      UsagePlanName: bfan shortener Usage Plan
+      Description: Usage plan for external providers pushing data to bfan
+      ApiStages:
+        - ApiId:
+            Ref: UrlShortenerAPI
+          Stage: Prod
+        - ApiId:
+            Ref: UrlShortenerAPI
+          Stage: Stage
+      Quota:
+        Limit: 5000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 200
+        RateLimit: 100
 
 ###################################################################################################
 ##   IAM Roles                                                                                   ##
@@ -107,7 +149,7 @@ Resources:
             Effect: "Allow"
             Principal:
               Service: "apigateway.amazonaws.com"
-            Action: 
+            Action:
               - "sts:AssumeRole"
       Policies:
         - PolicyName: DDBReadPolicy
@@ -136,7 +178,7 @@ Resources:
             Effect: "Allow"
             Principal:
               Service: "apigateway.amazonaws.com"
-            Action: 
+            Action:
               - "sts:AssumeRole"
       Policies:
         - PolicyName: DDBCrudPolicy
@@ -176,7 +218,7 @@ Resources:
     Type: 'AWS::ApiGateway::Account'
     Properties:
       CloudWatchRoleArn: !GetAtt CloudWatchRole.Arn
-      
+
   CloudWatchRole:
     Type: 'AWS::IAM::Role'
     Properties:
