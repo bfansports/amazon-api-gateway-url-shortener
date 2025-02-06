@@ -63,6 +63,7 @@ Resources:
   LinkTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: UrlShortenerLinks
       BillingMode: PAY_PER_REQUEST
       TimeToLiveSpecification:
         AttributeName: expiration
