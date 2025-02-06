@@ -45,6 +45,12 @@ paths:
             type: string
           required: true
           description: Short link ID for full URL
+        - in: query
+          name: key
+          schema:
+            type: string
+          required: false
+          description: Key to access link
       responses:
         "301":
           description: "301 redirect"
@@ -80,7 +86,24 @@ paths:
               application/json: |
                 #set($inputRoot = $input.path('$'))
                 #if($inputRoot.toString().contains("Item"))
-                  #set($context.responseOverride.header.Location = $inputRoot.Item.url.S)
+                  #set($itemHostname = $inputRoot.Item.hostname.S)
+                  #set($requestHostname = $context.domainName)
+                  #set($querySecret = $input.params().querystring.key)
+
+                  #set($hasSecret = $inputRoot.Item.secret && $inputRoot.Item.secret.S)
+                  #if($hasSecret)
+                    #set($itemSecret = $inputRoot.Item.secret.S)
+                  #else
+                    #set($itemSecret = "")
+                  #end
+
+                  #if($itemHostname == $requestHostname && (!$hasSecret || $itemSecret == $querySecret))
+                    #set($context.responseOverride.header.Location = $inputRoot.Item.url.S)
+                  #else
+                    #set($context.responseOverride.status = 403)
+                  #end
+                #else
+                  #set($context.responseOverride.status = 404)
                 #end
         type: "aws"
 
@@ -181,6 +204,11 @@ paths:
                 #set( $expirationValue = 31536000 )
               #end
               #set( $expiration = $now + $expirationValue )
+              #set( $hostname = $context.domainName )
+              #if( !$hostname || $hostname == "" )
+                #set( $hostname = "unknown" )  ## Fallback if `Host` is not available
+              #end
+
               {
                 "TableName": "${LinkTable}",
                 "ConditionExpression": "attribute_not_exists(id)",
@@ -193,7 +221,9 @@ paths:
                   "#u": "url",
                   "#o": "owner",
                   "#ts": "timestamp",
-                  "#exp": "expiration"
+                  "#exp": "expiration",
+                  "#secret": "secret",
+                  "#hostname": "hostname"
                 },
                 "ExpressionAttributeValues": {
                   ":u": {
@@ -207,11 +237,18 @@ paths:
                   },
                   ":exp": {
                     "N": "$expiration"
+                  },
+                  ":secret": {
+                    "S": $input.json('$.secret')
+                  },
+                  ":hostname": {
+                    "S": "$hostname"
                   }
                 },
-                "UpdateExpression": "SET #u = :u, #o = :o, #ts = :ts, #exp = :exp",
+                "UpdateExpression": "SET #u = :u, #o = :o, #ts = :ts, #exp = :exp, #secret = :secret, #hostname = :hostname",
                 "ReturnValues": "ALL_NEW"
               }
+        ## or "$input.params('Host')"
         passthroughBehavior: "when_no_templates"
         responses:
           "200":
@@ -224,7 +261,9 @@ paths:
                   "url":"$inputRoot.Attributes.url.S",
                   "timestamp":$inputRoot.Attributes.timestamp.N,
                   "expiration":$inputRoot.Attributes.expiration.N,
-                  "owner":"$inputRoot.Attributes.owner.S"
+                  "owner":"$inputRoot.Attributes.owner.S",
+                  "secret":"$inputRoot.Attributes.secret.S",
+                  "hostname":"$inputRoot.Attributes.hostname.S"
                 }
           "400":
             statusCode: "400"
@@ -456,6 +495,8 @@ components:
           pattern: ^https?://[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)
         expiration:
           type: integer
+        secret:
+          type: string
       required:
         - id
         - url
