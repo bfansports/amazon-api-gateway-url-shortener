@@ -45,6 +45,12 @@ paths:
             type: string
           required: true
           description: Short link ID for full URL
+        - in: query
+          name: key
+          schema:
+            type: string
+          required: false
+          description: Key to access link
       responses:
         "301":
           description: "301 redirect"
@@ -60,7 +66,16 @@ paths:
         uri: {"Fn::Sub":"arn:aws:apigateway:${AWS::Region}:dynamodb:action/GetItem"}
         httpMethod: "POST"
         requestTemplates:
-          application/json: {"Fn::Sub": "{\"Key\": {\"id\": {\"S\": \"$input.params().path.linkId\"}}, \"TableName\": \"${LinkTable}\"}"}
+          application/json:
+            Fn::Sub: |
+              {
+                "Key": {
+                  "id": {
+                    "S": "$input.params().path.linkId"
+                  }
+                },
+                "TableName": "${LinkTable}"
+              }
         passthroughBehavior: "when_no_templates"
         responses:
           "200":
@@ -68,10 +83,28 @@ paths:
             responseParameters:
               method.response.header.Cache-Control: "'max-age=300'"
             responseTemplates:
-              application/json: "#set($inputRoot = $input.path('$')) \
-                #if($inputRoot.toString().contains(\"Item\")) \
-                #set($context.responseOverride.header.Location = $inputRoot.Item.url.S) \
-                #end"
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #if($inputRoot.toString().contains("Item"))
+                  #set($itemHostname = $inputRoot.Item.hostname.S)
+                  #set($requestHostname = $context.domainName)
+                  #set($querySecret = $input.params().querystring.key)
+
+                  #set($hasSecret = $inputRoot.Item.secret && $inputRoot.Item.secret.S)
+                  #if($hasSecret)
+                    #set($itemSecret = $inputRoot.Item.secret.S)
+                  #else
+                    #set($itemSecret = "")
+                  #end
+
+                  #if($itemHostname == $requestHostname && (!$hasSecret || $itemSecret == $querySecret))
+                    #set($context.responseOverride.header.Location = $inputRoot.Item.url.S)
+                  #else
+                    #set($context.responseOverride.status = 403)
+                  #end
+                #else
+                  #set($context.responseOverride.status = 404)
+                #end
         type: "aws"
 
   /app:
@@ -97,10 +130,21 @@ paths:
         uri: {"Fn::Sub":"arn:aws:apigateway:${AWS::Region}:dynamodb:action/Query"}
         httpMethod: "POST"
         requestTemplates:
-          application/json: { "Fn::Sub": "{\"TableName\": \"${LinkTable}\", \
-            \"IndexName\":\"OwnerIndex\",\"KeyConditionExpression\": \"#n_owner = :v_owner\", \
-            \"ExpressionAttributeValues\": \
-            {\":v_owner\": {\"S\": \"bFAN\"}},\"ExpressionAttributeNames\": {\"#n_owner\": \"owner\"}}"}
+          application/json:
+            Fn::Sub: |
+              {
+                "TableName": "${LinkTable}",
+                "IndexName": "OwnerIndex",
+                "KeyConditionExpression": "#n_owner = :v_owner",
+                "ExpressionAttributeValues": {
+                  ":v_owner": {
+                    "S": "bfan"
+                  }
+                },
+                "ExpressionAttributeNames": {
+                  "#n_owner": "owner"
+                }
+              }
         passthroughBehavior: "when_no_templates"
         responses:
           "200":
@@ -108,14 +152,15 @@ paths:
             responseParameters:
               method.response.header.Cache-Control: "'no-cache, no-store'"
             responseTemplates:
-              application/json: "#set($inputRoot = $input.path('$'))[ \
-                #foreach($elem in $inputRoot.Items) { \
-                  \"id\":\"$elem.id.S\", \
-                  \"url\": \"$elem.url.S\", \
-                  \"timestamp\": \"$elem.timestamp.S\", \
-                  \"owner\": \"$elem.owner.S\"} \
-                #if($foreach.hasNext),#end \
-                #end]"
+              application/json: |
+                #set($inputRoot = $input.path('$'))[
+                #foreach($elem in $inputRoot.Items) {
+                  "id":"$elem.id.S",
+                  "url": "$elem.url.S",
+                  "timestamp": "$elem.timestamp.S",
+                  "owner": "$elem.owner.S"}
+                #if($foreach.hasNext),#end
+                #end]
         type: "AWS"
 
     ## Create a new link
@@ -151,31 +196,87 @@ paths:
         uri: { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:dynamodb:action/UpdateItem" }
         httpMethod: "POST"
         requestTemplates:
-          application/json: { "Fn::Sub": "#set( $seconds = (($context.requestTimeEpoch/1000)+2419200) ){\"TableName\": \"${LinkTable}\",\
-            \"ConditionExpression\":\"attribute_not_exists(id)\", \
-            \"Key\": {\"id\": {\"S\": $input.json('$.id')}}, \
-            \"ExpressionAttributeNames\": {\"#u\": \"url\",\"#o\": \"owner\",\"#ts\": \"timestamp\",\"#exp\": \"expiration\"}, \
-            \"ExpressionAttributeValues\":{\":u\": {\"S\": $input.json('$.url')},\":o\": {\"S\": \"bFAN\"},\":ts\": {\"S\": \"$context.requestTime\"},\":exp\": {\"N\": \"$seconds\"}}, \
-            \"UpdateExpression\": \"SET #u = :u, #o = :o, #ts = :ts, #exp = :exp\", \
-            \"ReturnValues\": \"ALL_NEW\"}" }
+          application/json:
+            Fn::Sub: |
+              #set( $now = ($context.requestTimeEpoch / 1000))
+              #set( $expirationValue = $util.parseJson($input.body).expiration )
+              #if( !$expirationValue || $expirationValue == "" )
+                #set( $expirationValue = 31536000 )
+              #end
+              #set( $expiration = $now + $expirationValue )
+              #set( $hostname = $context.domainName )
+              #if( !$hostname || $hostname == "" )
+                #set( $hostname = "unknown" )  ## Fallback if `Host` is not available
+              #end
+
+              {
+                "TableName": "${LinkTable}",
+                "ConditionExpression": "attribute_not_exists(id)",
+                "Key": {
+                  "id": {
+                    "S": $input.json('$.id')
+                  }
+                },
+                "ExpressionAttributeNames": {
+                  "#u": "url",
+                  "#o": "owner",
+                  "#ts": "timestamp",
+                  "#exp": "expiration",
+                  "#secret": "secret",
+                  "#hostname": "hostname"
+                },
+                "ExpressionAttributeValues": {
+                  ":u": {
+                    "S": $input.json('$.url')
+                  },
+                  ":o": {
+                    "S": "bfan"
+                  },
+                  ":ts": {
+                    "N": "$now"
+                  },
+                  ":exp": {
+                    "N": "$expiration"
+                  },
+                  ":secret": {
+                    "S": $input.json('$.secret')
+                  },
+                  ":hostname": {
+                    "S": "$hostname"
+                  }
+                },
+                "UpdateExpression": "SET #u = :u, #o = :o, #ts = :ts, #exp = :exp, #secret = :secret, #hostname = :hostname",
+                "ReturnValues": "ALL_NEW"
+              }
+        ## or "$input.params('Host')"
         passthroughBehavior: "when_no_templates"
         responses:
           "200":
             statusCode: "200"
             responseTemplates:
-              application/json: "#set($inputRoot = $input.path('$')) \
-                {\"id\":\"$inputRoot.Attributes.id.S\", \
-                \"url\":\"$inputRoot.Attributes.url.S\",
-                \"timestamp\":\"$inputRoot.Attributes.timestamp.S\", \
-                \"owner\":\"$inputRoot.Attributes.owner.S\"}"
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                {
+                  "id":"$inputRoot.Attributes.id.S",
+                  "url":"$inputRoot.Attributes.url.S",
+                  "timestamp":$inputRoot.Attributes.timestamp.N,
+                  "expiration":$inputRoot.Attributes.expiration.N,
+                  "owner":"$inputRoot.Attributes.owner.S",
+                  "secret":"$inputRoot.Attributes.secret.S",
+                  "hostname":"$inputRoot.Attributes.hostname.S"
+                }
           "400":
             statusCode: "400"
             responseTemplates:
-              application/json: "#set($inputRoot = $input.path('$')) \
-                #if($inputRoot.toString().contains(\"ConditionalCheckFailedException\")) \
-                #set($context.responseOverride.status = 200)
-                {\"error\": true,\"message\": \"URL link already exists\"} \
-                #end"
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #if($inputRoot.toString().contains("ConditionalCheckFailedException"))
+                  #set($context.responseOverride.status = 200)
+                  {
+                    "error": true,
+                    "message": "URL link already exists"
+                  }
+                #end
         type: "aws"
 
     ## Options for get and post that do not have a linkId
@@ -195,7 +296,10 @@ paths:
                 type: "string"
       x-amazon-apigateway-integration:
         requestTemplates:
-          application/json: "{\"statusCode\": 200}"
+          application/json: |
+            {
+              "statusCode": 200
+            }
         passthroughBehavior: "when_no_match"
         responses:
           default:
@@ -230,11 +334,25 @@ paths:
         uri: { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:dynamodb:action/DeleteItem" }
         httpMethod: "POST"
         requestTemplates:
-          application/json: { "Fn::Sub":  "{\"Key\": {\"id\": {\"S\": \"$input.params().path.linkId\"}}, \
-            \"TableName\": \"${LinkTable}\", \
-            \"ConditionExpression\": \"#owner = :owner\", \
-            \"ExpressionAttributeValues\":{\":owner\": {\"S\": \"bFAN\"}}, \
-            \"ExpressionAttributeNames\": {\"#owner\": \"owner\"}}" }
+          application/json:
+            Fn::Sub: |
+              {
+                "Key": {
+                  "id": {
+                    "S": "$input.params().path.linkId"
+                  }
+                },
+                "TableName": "${LinkTable}",
+                "ConditionExpression": "#owner = :owner",
+                "ExpressionAttributeValues": {
+                  ":owner": {
+                    "S": "bfan"
+                  }
+                },
+                "ExpressionAttributeNames": {
+                  "#owner": "owner"
+                }
+              }
         passthroughBehavior: "when_no_templates"
         responses:
           "200":
@@ -242,7 +360,12 @@ paths:
           "400":
             statusCode: "400"
             responseTemplates:
-              application/json: "{\"error\": {\"message\":\"Either you do not have permission to do this operation or a parameter is missing\"}}"
+              application/json: |
+                {
+                  "error": {
+                    "message": "Either you do not have permission to do this operation or a parameter is missing"
+                  }
+                }
         type: "aws"
     ## Update links
     put:
@@ -271,7 +394,7 @@ paths:
           headers:
             Access-Control-Allow-Origin:
               type: "string"
-      
+
       ## API gateway integration
       x-amazon-apigateway-integration:
         credentials:
@@ -279,26 +402,56 @@ paths:
         uri: { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:dynamodb:action/UpdateItem" }
         httpMethod: "POST"
         requestTemplates:
-          application/json: { "Fn::Sub": "{\"TableName\": \"${LinkTable}\",\
-            \"Key\": {\"id\": {\"S\": $input.json('$.id')}}, \
-            \"ExpressionAttributeNames\": {\"#u\": \"url\", \"#owner\": \"owner\", \"#id\":\"id\"}, \
-            \"ExpressionAttributeValues\":{\":u\": {\"S\": $input.json('$.url')}, \":owner\": {\"S\": \"bFAN\"}, \":linkId\":{\"S\":\"$input.params().path.linkId\"}}, \
-            \"UpdateExpression\": \"SET #u = :u\", \
-            \"ReturnValues\": \"ALL_NEW\", \
-            \"ConditionExpression\": \"#owner = :owner AND #id = :linkId\"}" }
+          application/json:
+            Fn::Sub: |
+              {
+                "TableName": "${LinkTable}",
+                "Key": {
+                  "id": {
+                    "S": $input.json('$.id')
+                  }
+                },
+                "ExpressionAttributeNames": {
+                  "#u": "url",
+                  "#owner": "owner",
+                  "#id": "id"
+                },
+                "ExpressionAttributeValues": {
+                  ":u": {
+                    "S": $input.json('$.url')
+                  },
+                  ":owner": {
+                    "S": "bfan"
+                  },
+                  ":linkId": {
+                    "S": "$input.params().path.linkId"
+                  }
+                },
+                "UpdateExpression": "SET #u = :u",
+                "ReturnValues": "ALL_NEW",
+                "ConditionExpression": "#owner = :owner AND #id = :linkId"
+              }
         passthroughBehavior: "when_no_templates"
         responses:
           "200":
             statusCode: "200"
             responseTemplates:
-              application/json: "#set($inputRoot = $input.path('$')) \
-                {\"id\":\"$inputRoot.Attributes.id.S\", \
-                \"url\":\"$inputRoot.Attributes.url.S\",
-                \"timestamp\":\"$inputRoot.Attributes.timestamp.S\", \
-                \"owner\":\"$inputRoot.Attributes.owner.S\"}"
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                {
+                  "id":"$inputRoot.Attributes.id.S",
+                  "url":"$inputRoot.Attributes.url.S",
+                  "timestamp":"$inputRoot.Attributes.timestamp.S",
+                  "owner":"$inputRoot.Attributes.owner.S"
+                }
           "400":
             statusCode: "400"
-            application/json: "{\"error\": {\"message\":\"Either you do not have permission to do this operation or a parameter is missing\"}}"
+            application/json: |
+              {
+                "error": {
+                  "message": "Either you do not have permission to do this operation or a parameter is missing"
+                }
+              }
         type: "aws"
     options:
       responses:
@@ -316,7 +469,10 @@ paths:
                 type: "string"
       x-amazon-apigateway-integration:
         requestTemplates:
-          application/json: "{\"statusCode\" : 200}"
+          application/json: |
+            {
+              "statusCode": 200
+            }
         passthroughBehavior: "when_no_match"
         responses:
           default:
@@ -337,6 +493,10 @@ components:
         url:
           type: string
           pattern: ^https?://[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)
+        expiration:
+          type: integer
+        secret:
+          type: string
       required:
         - id
         - url
