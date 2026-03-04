@@ -235,7 +235,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: "URL Shortener API 4xx Alarm"
-      AlarmDescription: "4xx monitor (excluding expired/missing link 404s and scanner 403s on /{linkId}, and scanner 403s on unknown paths)"
+      AlarmDescription: "4xx monitor (excluding expired/missing link 404s and scanner 403s on /{linkId}, /, and unknown paths)"
       Metrics:
         - Id: total4xx
           MetricStat:
@@ -364,7 +364,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref AccessLogGroup
-      FilterPattern: '{ ($.status = 403 && $.resourcePath = "") || ($.status = 403 && $.resourcePath = "/{linkId}") }'
+      FilterPattern: '{ ($.status = 403 && $.resourcePath = "") || ($.status = 403 && $.resourcePath = "/") || ($.status = 403 && $.resourcePath = "/{linkId}") }'
       MetricTransformations:
         - MetricName: "ScannerAccess"
           MetricNamespace: !Sub "${AppName}/URLShortener"
