@@ -235,42 +235,14 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: "URL Shortener API 4xx Alarm"
-      AlarmDescription: "4xx monitor (excluding expired/missing link 404s and scanner 403s on /{linkId}, /, and unknown paths)"
-      Metrics:
-        - Id: total4xx
-          MetricStat:
-            Metric:
-              Namespace: "AWS/ApiGateway"
-              MetricName: "4XXError"
-              Dimensions:
-                - Name: "ApiName"
-                  Value: "URL Shortener API"
-            Period: 60
-            Stat: "Sum"
-          ReturnData: false
-        - Id: expired404s
-          MetricStat:
-            Metric:
-              Namespace: !Sub "${AppName}/URLShortener"
-              MetricName: "ExpiredLinkAccess"
-            Period: 60
-            Stat: "Sum"
-          ReturnData: false
-        - Id: scanner403s
-          MetricStat:
-            Metric:
-              Namespace: !Sub "${AppName}/URLShortener"
-              MetricName: "ScannerAccess"
-            Period: 60
-            Stat: "Sum"
-          ReturnData: false
-        - Id: unexpectedErrors
-          Expression: "total4xx - FILL(expired404s, 0) - FILL(scanner403s, 0)"
-          Label: "Unexpected 4xx Errors"
-          ReturnData: true
-      ComparisonOperator: "GreaterThanThreshold"
-      Threshold: 0
+      AlarmDescription: "4xx errors on /app endpoints (auth failures, bad requests) — 404s on /{linkId} are never counted"
+      MetricName: "ApiPathError"
+      Namespace: !Sub "${AppName}/URLShortener"
+      Statistic: "Sum"
+      Period: 60
       EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: "GreaterThanThreshold"
       TreatMissingData: notBreaching
       AlarmActions:
         - !ImportValue EmailNotificationTopic
@@ -347,26 +319,15 @@ Resources:
       AlarmActions:
         - !ImportValue EmailNotificationTopic
 
-  ##   Metric filter: count 404s on /{linkId} (expired or missing links) — logged but not alarmed
-  ExpiredLinkMetricFilter:
+  ##   Metric filter: 4xx errors on /app endpoints — these are real errors worth alarming on
+  ##   404s on /{linkId} (missing/expired links, bots) are never matched here
+  ApiErrorMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref AccessLogGroup
-      FilterPattern: '{ $.status = 404 && $.resourcePath = "/{linkId}" }'
+      FilterPattern: '{ ($.status >= 400 && $.status <= 499) && ($.resourcePath = "/app" || $.resourcePath = "/app/{linkId}") }'
       MetricTransformations:
-        - MetricName: "ExpiredLinkAccess"
-          MetricNamespace: !Sub "${AppName}/URLShortener"
-          MetricValue: "1"
-          DefaultValue: 0
-
-  ##   Metric filter: count 403s on unknown paths or /{linkId} (scanner/bot traffic) — logged but not alarmed
-  ScannerAccessMetricFilter:
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName: !Ref AccessLogGroup
-      FilterPattern: '{ ($.status = 403 && $.resourcePath = "") || ($.status = 403 && $.resourcePath = "/") || ($.status = 403 && $.resourcePath = "/{linkId}") }'
-      MetricTransformations:
-        - MetricName: "ScannerAccess"
+        - MetricName: "ApiPathError"
           MetricNamespace: !Sub "${AppName}/URLShortener"
           MetricValue: "1"
           DefaultValue: 0
