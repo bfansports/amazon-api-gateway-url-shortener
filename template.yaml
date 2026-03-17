@@ -278,7 +278,7 @@ Resources:
       ExtendedStatistic: "p99"
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 75
+      Threshold: 1000
       ComparisonOperator: "GreaterThanThreshold"
       AlarmActions:
         - !ImportValue EmailNotificationTopic
