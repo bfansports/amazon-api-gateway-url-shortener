@@ -319,6 +319,16 @@ Resources:
       AlarmActions:
         - !ImportValue EmailNotificationTopic
 
+  ##   Gateway response override: return 403 instead of 415 to avoid leaking endpoint info
+  GatewayResponseUnsupportedMediaType:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref UrlShortenerAPI
+      ResponseType: UNSUPPORTED_MEDIA_TYPE
+      StatusCode: "403"
+      ResponseTemplates:
+        application/json: '{"message":"Forbidden"}'
+
   ##   Metric filter: 4xx errors on /app endpoints — these are real errors worth alarming on
   ##   404s on /{linkId} (missing/expired links, bots) are never matched here
   ApiErrorMetricFilter:
