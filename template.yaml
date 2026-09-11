@@ -235,7 +235,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: "URL Shortener API 4xx Alarm"
-      AlarmDescription: "4xx errors on /app endpoints (auth failures, bad requests) — 404s on /{linkId} are never counted"
+      AlarmDescription: "4xx errors on /app endpoints (bad requests, throttling) — 403s (missing/invalid API key, mostly bot scans) and 404s on /{linkId} are never counted"
       MetricName: "ApiPathError"
       Namespace: !Sub "${AppName}/URLShortener"
       Statistic: "Sum"
@@ -331,11 +331,13 @@ Resources:
 
   ##   Metric filter: 4xx errors on /app endpoints — these are real errors worth alarming on
   ##   404s on /{linkId} (missing/expired links, bots) are never matched here
+  ##   403s excluded: on /app they only mean a missing/invalid API key, which is almost always
+  ##   background internet bot scanning rather than a real problem worth paging on
   ApiErrorMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref AccessLogGroup
-      FilterPattern: '{ ($.status >= 400 && $.status <= 499) && ($.resourcePath = "/app" || $.resourcePath = "/app/{linkId}") }'
+      FilterPattern: '{ ($.status >= 400 && $.status <= 499 && $.status != 403) && ($.resourcePath = "/app" || $.resourcePath = "/app/{linkId}") }'
       MetricTransformations:
         - MetricName: "ApiPathError"
           MetricNamespace: !Sub "${AppName}/URLShortener"
