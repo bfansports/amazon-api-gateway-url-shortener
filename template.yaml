@@ -40,6 +40,9 @@ Resources:
       EndpointConfiguration:
         Type: EDGE
       TracingEnabled: true
+      ## Stays false: true would make SAM require the key on every method, public
+      ## GET /{linkId} redirects included. The /app methods require it through
+      ## `security: - api_key: []` + components.securitySchemes in api.yaml.
       Auth:
         ApiKeyRequired: false
       MethodSettings:

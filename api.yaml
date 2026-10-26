@@ -582,3 +582,12 @@ components:
       description: Short link ID for full URL
       schema:
         type: string
+  ## Referenced by `security: - api_key: []` on every /app method. Without this
+  ## definition API Gateway imports those methods with apiKeyRequired=false, i.e.
+  ## /app was open to anyone. The name must be x-api-key for API Gateway to map it
+  ## to its API keys (matched case-insensitively against the X-API-Key header).
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: x-api-key
+      in: header
